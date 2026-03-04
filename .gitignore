@@ -39,3 +39,7 @@ Desktop.ini
 # Blender source files (not needed for web)
 *.blend
 *.blend1
+
+# Keep GLB model files
+!public/models/*.glb
+!public/models/
