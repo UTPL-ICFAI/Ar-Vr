@@ -5,7 +5,7 @@ import GARMENTS from '../constants/garments';
 import { computeGarmentTransform, videoPixelToWorld } from '../utils/garmentPositioner';
 import { prepareSleeveData, deformSleeves, resetSleeves } from '../utils/armDeformer';
 
-export default function useThreeJS(containerRef, videoRef, currentCloth, adjustments, lastPoseRef, onModelLoaded, garmentFlipped) {
+export default function useThreeJS(containerRef, videoRef, currentCloth, adjustments, lastPoseRef, onModelLoaded, garmentFlipped, onBonesLoaded) {
   const rendererRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
@@ -17,6 +17,9 @@ export default function useThreeJS(containerRef, videoRef, currentCloth, adjustm
   const garmentFlippedRef = useRef(false);
   const videoElRef = useRef(null);
   const currentClothRef = useRef(currentCloth);
+  const bonesRef = useRef({});
+  const isRiggedRef = useRef(false);
+  const baseRotationRef = useRef(null);
 
   // Smoothing refs
   const smoothPos = useRef(new THREE.Vector3());
@@ -70,15 +73,169 @@ export default function useThreeJS(containerRef, videoRef, currentCloth, adjustm
   function setMeshOpacity(mesh, opacity) {
     mesh.traverse((child) => {
       if (child.isMesh && child.material) {
+        const mats = Array.isArray(child.material)
+          ? child.material
+          : [child.material];
         const needsTransparent = opacity < 0.99;
-        if (child.material.transparent !== needsTransparent ||
-            Math.abs(child.material.opacity - opacity) > 0.01) {
-          child.material.transparent = needsTransparent;
-          child.material.opacity = opacity;
-          child.material.needsUpdate = true;
-        }
+        mats.forEach(mat => {
+          if (mat.transparent !== needsTransparent ||
+              Math.abs(mat.opacity - opacity) > 0.01) {
+            mat.transparent = needsTransparent;
+            mat.opacity = opacity;
+            mat.needsUpdate = true;
+          }
+        });
       }
     });
+  }
+
+  // ── BONE DRIVING FUNCTION (for rigged garments) ──
+  function driveBones(pose, videoEl) {
+    // Only drive bones if model is rigged and has bones
+    if (!isRiggedRef.current) return;
+    if (!pose || !videoEl) return;
+
+    const bones = bonesRef.current;
+    if (Object.keys(bones).length === 0) return;
+
+    const kps = pose.keypoints;
+    const vW = videoEl.videoWidth  || 1280;
+    const vH = videoEl.videoHeight || 720;
+    const cW = containerRef.current?.clientWidth  || 800;
+    const cH = containerRef.current?.clientHeight || 600;
+
+    const BONE_SMOOTH = 0.15;
+
+    // Helper: find bone by multiple possible names
+    function findBone(keywords) {
+      const boneKeys = Object.keys(bones);
+
+      // Try exact match first
+      for (const keyword of keywords) {
+        const exact = boneKeys.find(k =>
+          k.toLowerCase() === keyword.toLowerCase()
+        );
+        if (exact) return bones[exact];
+      }
+
+      // Try contains match
+      for (const keyword of keywords) {
+        const contains = boneKeys.find(k =>
+          k.toLowerCase().includes(keyword.toLowerCase())
+        );
+        if (contains) return bones[contains];
+      }
+
+      return null;
+    }
+
+    // Helper: get world position of a keypoint
+    function kpWorld(kp) {
+      if (!kp || kp.score < 0.25) return null;
+      return videoPixelToWorld(kp.x, kp.y, vW, vH, cW, cH, cameraRef.current);
+    }
+
+    // Helper: smooth angle lerp
+    function smoothAngle(current, target, factor) {
+      let delta = target - current;
+      while (delta >  Math.PI) delta -= Math.PI * 2;
+      while (delta < -Math.PI) delta += Math.PI * 2;
+      return current + delta * factor;
+    }
+
+    // ── LEFT UPPER ARM (shoulder to elbow) ──
+    const lSh = kpWorld(kps[5]);
+    const lEl = kpWorld(kps[7]);
+    if (lSh && lEl) {
+      const lUpperBone = findBone([
+        'mixamorig:leftarm', 'mixamorigleftarm',
+        'left_arm', 'leftarm', 'l_arm', 'larm',
+        'upper_arm.l', 'upperarm.l', 'arm.l',
+        'left upper', 'leftshoulder',
+        'bone.003', 'bone.004', 'upper_arm_l', 'arm_l',
+        'bicep_l', 'shoulder_l', 'humerus_l'
+      ]);
+      if (lUpperBone) {
+        const dir = new THREE.Vector3().subVectors(lEl, lSh);
+        const angleZ = Math.atan2(dir.y, dir.x);
+        const angleX = Math.atan2(dir.z, Math.sqrt(dir.x*dir.x + dir.y*dir.y));
+        lUpperBone.rotation.z = smoothAngle(lUpperBone.rotation.z, angleZ - Math.PI/2, BONE_SMOOTH);
+        lUpperBone.rotation.x = smoothAngle(lUpperBone.rotation.x, angleX, BONE_SMOOTH);
+      }
+    }
+
+    // ── LEFT FOREARM (elbow to wrist) ──
+    const lWr = kpWorld(kps[9]);
+    if (lEl && lWr) {
+      const lForearmBone = findBone([
+        'mixamorig:leftforearm', 'mixamorigleftforearm',
+        'left_forearm', 'leftforearm', 'l_forearm', 'lforearm',
+        'forearm.l', 'lower_arm.l', 'lowerarm.l',
+        'left fore', 'left lower',
+        'bone.005', 'bone.006', 'forearm_l', 'lower_arm_l',
+        'elbow_l', 'radius_l'
+      ]);
+      if (lForearmBone) {
+        const dir = new THREE.Vector3().subVectors(lWr, lEl);
+        const angleZ = Math.atan2(dir.y, dir.x);
+        lForearmBone.rotation.z = smoothAngle(lForearmBone.rotation.z, angleZ - Math.PI/2, BONE_SMOOTH);
+      }
+    }
+
+    // ── RIGHT UPPER ARM (shoulder to elbow) ──
+    const rSh = kpWorld(kps[6]);
+    const rEl = kpWorld(kps[8]);
+    if (rSh && rEl) {
+      const rUpperBone = findBone([
+        'mixamorig:rightarm', 'mixamorigrightarm',
+        'right_arm', 'rightarm', 'r_arm', 'rarm',
+        'upper_arm.r', 'upperarm.r', 'arm.r',
+        'right upper', 'rightshoulder',
+        'bone.007', 'bone.008', 'upper_arm_r', 'arm_r',
+        'bicep_r', 'shoulder_r', 'humerus_r'
+      ]);
+      if (rUpperBone) {
+        const dir = new THREE.Vector3().subVectors(rEl, rSh);
+        const angleZ = Math.atan2(dir.y, dir.x);
+        const angleX = Math.atan2(dir.z, Math.sqrt(dir.x*dir.x + dir.y*dir.y));
+        rUpperBone.rotation.z = smoothAngle(rUpperBone.rotation.z, angleZ - Math.PI/2, BONE_SMOOTH);
+        rUpperBone.rotation.x = smoothAngle(rUpperBone.rotation.x, angleX, BONE_SMOOTH);
+      }
+    }
+
+    // ── RIGHT FOREARM (elbow to wrist) ──
+    const rWr = kpWorld(kps[10]);
+    if (rEl && rWr) {
+      const rForearmBone = findBone([
+        'mixamorig:rightforearm', 'mixamorigrightforearm',
+        'right_forearm', 'rightforearm', 'r_forearm', 'rforearm',
+        'forearm.r', 'lower_arm.r', 'lowerarm.r',
+        'right fore', 'right lower',
+        'bone.009', 'bone.010', 'forearm_r', 'lower_arm_r',
+        'elbow_r', 'radius_r'
+      ]);
+      if (rForearmBone) {
+        const dir = new THREE.Vector3().subVectors(rWr, rEl);
+        const angleZ = Math.atan2(dir.y, dir.x);
+        rForearmBone.rotation.z = smoothAngle(rForearmBone.rotation.z, angleZ - Math.PI/2, BONE_SMOOTH);
+      }
+    }
+
+    // ── SPINE BONE (optional subtle body lean) ──
+    if (lSh && rSh) {
+      const spineBone = findBone([
+        'mixamorig:spine', 'mixamorigspine',
+        'spine', 'chest', 'torso', 'body',
+        'spine1', 'spine2',
+        'bone', 'bone.001', 'bone.002', 'root',
+        'pelvis', 'hip'
+      ]);
+      if (spineBone) {
+        const shoulderDir = new THREE.Vector3().subVectors(rSh, lSh);
+        const tiltZ = Math.atan2(shoulderDir.y, shoulderDir.x);
+        spineBone.rotation.z = smoothAngle(spineBone.rotation.z, tiltZ * 0.3, BONE_SMOOTH);
+      }
+    }
   }
 
   // Setup scene once on mount
@@ -98,7 +255,7 @@ export default function useThreeJS(containerRef, videoRef, currentCloth, adjustm
     renderer.shadowMap.enabled = false;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.outputEncoding = THREE.sRGBEncoding;
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -203,7 +360,7 @@ export default function useThreeJS(containerRef, videoRef, currentCloth, adjustm
             const posDelta = smoothPos.current.distanceTo(t.position);
             const scaleDelta = Math.abs(smoothScale.current.x - t.scaleX);
             const motion = posDelta + scaleDelta;
-            const S = THREE.MathUtils.clamp(0.08 + motion * 1.5, 0.08, 0.35);
+            const S = THREE.MathUtils.clamp(0.12 + motion * 2.0, 0.12, 0.45);
 
             // Position lerp
             smoothPos.current.lerp(t.position, S);
@@ -316,6 +473,11 @@ export default function useThreeJS(containerRef, videoRef, currentCloth, adjustm
         deformSleeves(sleeveDataRef.current, smoothLeftAngle.current, smoothRightAngle.current);
       }
 
+      // ── BONE DRIVING (for rigged garments) ──
+      if (lastPoseRef.current && videoElRef.current) {
+        driveBones(lastPoseRef.current, videoElRef.current);
+      }
+
       rendererRef.current.render(sceneRef.current, cameraRef.current);
     }
     renderLoop();
@@ -347,6 +509,18 @@ export default function useThreeJS(containerRef, videoRef, currentCloth, adjustm
       sceneRef.current.remove(clothMeshRef.current);
       clothMeshRef.current = null;
     }
+
+    // Reset all bones to rest position
+    if (clothMeshRef.current) {
+      clothMeshRef.current.traverse(child => {
+        if (child.isBone) {
+          child.rotation.set(0, 0, 0);
+          child.position.set(0, 0, 0);
+        }
+      });
+    }
+    bonesRef.current = {};
+    isRiggedRef.current = false;
 
     // Reset sleeve deformation data
     if (sleeveDataRef.current) {
@@ -422,25 +596,41 @@ export default function useThreeJS(containerRef, videoRef, currentCloth, adjustm
         // Start invisible — render loop shows it on first valid pose
         wrapper.visible = false;
 
-        // Fix materials: preserve PBR, fix common visibility issues
-        model.traverse((child) => {
-          if (child.isMesh) {
+        // Fix materials: force fully solid, opaque, front-side rendering
+        model.traverse(child => {
+          if (child.isMesh && child.material) {
+            // Handle both single material and material arrays
+            const mats = Array.isArray(child.material)
+              ? child.material
+              : [child.material];
+
+            mats.forEach(mat => {
+              mat.transparent = false;
+              mat.opacity = 1.0;
+              mat.alphaTest = 0;
+              mat.depthTest = true;
+              mat.depthWrite = true;
+              mat.side = THREE.FrontSide;
+              mat.needsUpdate = true;
+
+              // Fix dark materials — ensure they render visible
+              if (mat.color) {
+                const brightness = mat.color.r + mat.color.g + mat.color.b;
+                if (brightness < 0.1) {
+                  mat.color.setRGB(0.5, 0.5, 0.5);
+                }
+              }
+
+              if (mat.map) {
+                mat.map.encoding = THREE.sRGBEncoding;
+              }
+            });
+
+            // Fix geometry normals
             if (child.geometry) {
+              child.geometry.computeVertexNormals();
               child.geometry.computeBoundingBox();
               child.geometry.computeBoundingSphere();
-            }
-            if (child.material) {
-              if (!child.material.map && child.material.opacity < 0.3) {
-                child.material.opacity = 1.0;
-              }
-              child.material.transparent = child.material.opacity < 0.99;
-              child.material.side = THREE.DoubleSide;
-              child.material.depthTest = true;
-              child.material.depthWrite = true;
-              if (child.material.map) {
-                child.material.map.colorSpace = THREE.SRGBColorSpace;
-              }
-              child.material.needsUpdate = true;
             }
           }
         });
@@ -450,6 +640,36 @@ export default function useThreeJS(containerRef, videoRef, currentCloth, adjustm
 
         // Prepare sleeve vertex deformation data
         sleeveDataRef.current = prepareSleeveData(wrapper);
+
+        // Find all bones in the loaded model
+        const foundBones = {};
+        model.traverse(child => {
+          if (child.isBone) {
+            foundBones[child.name.toLowerCase()] = child;
+            console.log('Bone found:', child.name);
+          }
+        });
+        bonesRef.current = foundBones;
+
+        // Check if this garment is rigged
+        const garmentData = GARMENTS.find(g => g.id === currentClothRef.current);
+        isRiggedRef.current = garmentData?.isRigged || false;
+
+        console.log('Total bones found:', Object.keys(foundBones).length);
+        console.log('Is rigged:', isRiggedRef.current);
+
+        console.log('=== BONE NAMES IN MODEL ===');
+        Object.keys(bonesRef.current).forEach(name => {
+          console.log(' -', name);
+        });
+        console.log('===========================');
+
+        // Report bone names via callback for debug overlay
+        const boneNames = Object.keys(foundBones).join(', ');
+        if (onBonesLoaded) onBonesLoaded(boneNames || 'NO BONES FOUND');
+
+        // Store base rotation for flip reference
+        baseRotationRef.current = model.rotation.clone();
 
         // Reset smoothing for the new garment
         firstFrame.current = true;

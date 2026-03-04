@@ -131,14 +131,26 @@ export function computeGarmentTransform(pose, camera, container, adjustments, vi
   if (ratio > 1.3)  sH = sW * 1.3;
 
   const adj = adjustments.scale;
-  const scaleX = sW * adj;
-  const scaleY = sH * adj;
-  const scaleZ = sW * adj;
+  let scaleX = sW * adj;
+  let scaleY = sH * adj;
+  let scaleZ = sW * adj;
 
-  // ── Position ──
+  // ── Min/Max scale clamping (Fix 5+6) ──
   const fovRad = THREE.MathUtils.degToRad(camera.fov);
   const halfH  = Math.tan(fovRad / 2) * camera.position.z;
   const halfW  = halfH * camera.aspect;
+
+  // Minimum: garment at least ~15% of visible width
+  const minWorldWidth = halfW * 0.3;
+  const minScale = minWorldWidth / Math.max(modelW, 0.001);
+  // Maximum: garment never wider than ~90% of visible width
+  const maxScale = (halfW * 1.8) / Math.max(modelW, 0.001);
+
+  scaleX = Math.min(maxScale, Math.max(minScale, scaleX));
+  scaleY = Math.min(maxScale, Math.max(minScale, scaleY));
+  scaleZ = Math.min(maxScale, Math.max(minScale, scaleZ));
+
+  // ── Position ──
   const adjX   = (adjustments.x / 100) * halfW * 0.5;
   const adjY   = (adjustments.y / 100) * halfH * 0.5;
 
@@ -151,8 +163,12 @@ export function computeGarmentTransform(pose, camera, container, adjustments, vi
   }
 
   const posX = shoulderMidX + adjX;
-  const posY = centerY + adjY;
+  let posY = centerY + adjY;
   const posZ = (adjustments.z / 100) * 0.5;
+
+  // ── Clamp Y position to keep garment on screen when bending ──
+  const maxWorldY = halfH * 0.85;
+  posY = Math.max(-maxWorldY, Math.min(maxWorldY, posY));
 
   // ── Rotation ──
   // With mirrorX=true, lShWorld.x > rShWorld.x in world space.

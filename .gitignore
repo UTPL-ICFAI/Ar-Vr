@@ -35,3 +35,7 @@ Desktop.ini
 # Build / cache
 .cache
 *.tsbuildinfo
+
+# Blender source files (not needed for web)
+*.blend
+*.blend1

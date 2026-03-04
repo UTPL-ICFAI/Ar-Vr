@@ -34,6 +34,7 @@ export default function CameraView({
   onStartCamera,
   lastPose,
   currentCloth,
+  bonesDebug,
 }) {
   return (
     <div className="camera-area">
@@ -57,6 +58,7 @@ export default function CameraView({
           <div>L shoulder: ({Math.round(lastPose?.keypoints[5]?.x)}, {Math.round(lastPose?.keypoints[5]?.y)})</div>
           <div>R shoulder: ({Math.round(lastPose?.keypoints[6]?.x)}, {Math.round(lastPose?.keypoints[6]?.y)})</div>
           <div>Expected NDC Y: {lastPose ? (-(((lastPose.keypoints[5]?.y + lastPose.keypoints[6]?.y)/2 / (videoRef.current?.videoHeight||720)) * 2 - 1)).toFixed(2) : 'n/a'}</div>
+          {bonesDebug && <div>Bones: {bonesDebug}</div>}
         </div>
       )}
     </div>

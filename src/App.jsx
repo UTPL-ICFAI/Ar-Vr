@@ -25,6 +25,7 @@ function App() {
   const [loadedModels, setLoadedModels] = useState({});
   const [garmentFlipped, setGarmentFlipped] = useState(false);
   const [debugPose, setDebugPose] = useState(null);
+  const [bonesDebug, setBonesDebug] = useState(null);
 
   // Reset flip when garment changes
   useEffect(() => { setGarmentFlipped(false); }, [currentCloth]);
@@ -75,6 +76,10 @@ function App() {
     setLoadedModels((prev) => ({ ...prev, [id]: true }));
   }, []);
 
+  const handleBonesLoaded = useCallback((boneNames) => {
+    setBonesDebug(boneNames);
+  }, []);
+
   usePoseDetection(videoRef, overlayCanvasRef, cameraActive, handlePoseResult);
   const { rendererRef, sceneRef, cameraRef } = useThreeJS(
     threeContainerRef,
@@ -83,7 +88,8 @@ function App() {
     adjustments,
     lastPoseRef,
     handleModelLoaded,
-    garmentFlipped
+    garmentFlipped,
+    handleBonesLoaded
   );
 
   const handleSnapshot = useCallback(() => {
@@ -107,6 +113,7 @@ function App() {
           onStartCamera={handleStartCamera}
           lastPose={debugPose}
           currentCloth={currentCloth}
+          bonesDebug={bonesDebug}
         />
         <Sidebar
           currentCloth={currentCloth}

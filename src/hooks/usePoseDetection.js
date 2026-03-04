@@ -19,6 +19,8 @@ export default function usePoseDetection(videoRef, canvasRef, cameraActive, onPo
         poseDetection.SupportedModels.MoveNet,
         {
           modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER,
+          enableSmoothing: true,
+          minPoseScore: 0.3,
         }
       );
       if (cancelled) return;
@@ -65,10 +67,20 @@ export default function usePoseDetection(videoRef, canvasRef, cameraActive, onPo
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         if (poses.length > 0) {
+          // Pick pose with highest average keypoint confidence
+          // (filters out partially-detected background people)
+          const bestPose = poses.reduce((best, pose) => {
+            const avgScore = pose.keypoints.reduce((sum, kp) =>
+              sum + (kp?.score || 0), 0) / pose.keypoints.length;
+            const bestAvgScore = best.keypoints.reduce((sum, kp) =>
+              sum + (kp?.score || 0), 0) / best.keypoints.length;
+            return avgScore > bestAvgScore ? pose : best;
+          }, poses[0]);
+
           // Mirror keypoint X coordinates to match the CSS scaleX(-1) on the video
           const mirroredPose = {
-            ...poses[0],
-            keypoints: poses[0].keypoints.map((kp) => ({
+            ...bestPose,
+            keypoints: bestPose.keypoints.map((kp) => ({
               ...kp,
               x: videoWidth - kp.x,
             })),
