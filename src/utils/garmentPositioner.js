@@ -7,9 +7,9 @@ const _ndc = new THREE.Vector2();
 
 /**
  * Convert a video-space pixel (x,y) to Three.js world-space on the Z=0 plane.
- * Handles object-fit:cover scaling + CSS scaleX(-1) mirror.
+ * Handles object-fit:cover scaling + optional CSS scaleX(-1) mirror.
  */
-function videoPixelToWorld(videoX, videoY, vW, vH, cW, cH, camera, mirrorX = true) {
+export function videoPixelToWorld(videoX, videoY, vW, vH, cW, cH, camera, mirrorX = true) {
   // Object-fit: cover mapping
   const videoAspect = vW / vH;
   const containerAspect = cW / cH;
@@ -33,7 +33,6 @@ function videoPixelToWorld(videoX, videoY, vW, vH, cW, cH, camera, mirrorX = tru
   const ndcX = (cx / cW) * 2.0 - 1.0;
   const ndcY = 1.0 - (cy / cH) * 2.0;
 
-  // Unproject to Z=0 via raycaster (reuse module objects)
   _raycaster.setFromCamera(_ndc.set(ndcX, ndcY), camera);
   const worldPt = new THREE.Vector3();
   const hit = _raycaster.ray.intersectPlane(_zPlane, worldPt);
@@ -50,16 +49,18 @@ function videoPixelToWorld(videoX, videoY, vW, vH, cW, cH, camera, mirrorX = tru
 
 /**
  * Compute garment placement from pose landmarks.
- * Returns per-axis scale (scaleX, scaleY, scaleZ) for proper body-ratio matching.
+ * Uses torso center (shoulder midpoint ↔ hip midpoint) as anchor
+ * and shoulder distance for uniform scaling.
  *
- * @param {Object}   pose        – MoveNet/BlazePose result
+ * @param {Object}   pose
  * @param {THREE.PerspectiveCamera} camera
- * @param {HTMLElement} container – Three.js overlay container
- * @param {Object}   adjustments – {scale, x, y, z}
+ * @param {HTMLElement} container
+ * @param {Object}   adjustments – { scale, x, y, z }
  * @param {HTMLVideoElement} videoEl
- * @param {Object}   modelDims   – {width, height, depth} of the raw un-scaled model
+ * @param {Object}   modelDims   – { width, height, depth }
+ * @param {boolean}  isFrontCamera – whether to apply mirror in coordinate conversion
  */
-export function computeGarmentTransform(pose, camera, container, adjustments, videoEl, modelDims) {
+export function computeGarmentTransform(pose, camera, container, adjustments, videoEl, modelDims, isFrontCamera = true) {
   if (!pose || !videoEl || !camera || !container || !modelDims) return null;
 
   const kps  = pose.keypoints;
@@ -76,145 +77,95 @@ export function computeGarmentTransform(pose, camera, container, adjustments, vi
   const cW = container.clientWidth  || 800;
   const cH = container.clientHeight || 600;
 
+  const mirrorX = isFrontCamera;
+
   // ── Convert landmarks to world space ──
-  const lShWorld = videoPixelToWorld(lSh.x, lSh.y, vW, vH, cW, cH, camera);
-  const rShWorld = videoPixelToWorld(rSh.x, rSh.y, vW, vH, cW, cH, camera);
+  const lShWorld = videoPixelToWorld(lSh.x, lSh.y, vW, vH, cW, cH, camera, mirrorX);
+  const rShWorld = videoPixelToWorld(rSh.x, rSh.y, vW, vH, cW, cH, camera, mirrorX);
 
   const shoulderMidX = (lShWorld.x + rShWorld.x) / 2;
   const shoulderMidY = (lShWorld.y + rShWorld.y) / 2;
-  const worldShoulderW = lShWorld.distanceTo(rShWorld);
-
-  // ── Nose (used for neck position + turn direction) ──
-  let noseWorld = null;
-  if (nose && nose.score > 0.25) {
-    noseWorld = videoPixelToWorld(nose.x, nose.y, vW, vH, cW, cH, camera);
-  }
-
-  // ── Neck position ──
-  let neckY = shoulderMidY;
-  if (noseWorld) {
-    neckY = noseWorld.y + (shoulderMidY - noseWorld.y) * 0.75;
-  }
+  const shoulderDist = lShWorld.distanceTo(rShWorld);
 
   // ── Hip midpoint ──
   let hipMidY = null;
-  let hipMidX = null;
   if (lHip && rHip && lHip.score > 0.25 && rHip.score > 0.25) {
-    const lHipWorld = videoPixelToWorld(lHip.x, lHip.y, vW, vH, cW, cH, camera);
-    const rHipWorld = videoPixelToWorld(rHip.x, rHip.y, vW, vH, cW, cH, camera);
+    const lHipWorld = videoPixelToWorld(lHip.x, lHip.y, vW, vH, cW, cH, camera, mirrorX);
+    const rHipWorld = videoPixelToWorld(rHip.x, rHip.y, vW, vH, cW, cH, camera, mirrorX);
     hipMidY = (lHipWorld.y + rHipWorld.y) / 2;
-    hipMidX = (lHipWorld.x + rHipWorld.x) / 2;
   }
 
-  // ── Per-axis scale (body-ratio aware) ──
-  const SHOULDER_PAD = 1.30;               // garment slightly wider than shoulders
-  const targetW = worldShoulderW * SHOULDER_PAD;
-  const modelW  = Math.max(modelDims.width,  0.001);
-  const modelH  = Math.max(modelDims.height, 0.001);
+  // ── Neck position (between nose and shoulders) ──
+  let neckY = shoulderMidY;
+  let noseWorld = null;
+  if (nose && nose.score > 0.25) {
+    noseWorld = videoPixelToWorld(nose.x, nose.y, vW, vH, cW, cH, camera, mirrorX);
+    neckY = noseWorld.y + (shoulderMidY - noseWorld.y) * 0.75;
+  }
 
-  // Width-based scale: matches garment to shoulder span
-  const sW = targetW / modelW;
-
-  // Height-based scale: matches garment to actual torso length
-  let sH = sW; // default: uniform
+  // ── TORSO CENTER: anchor point for the garment ──
+  let torsoCenterY;
   if (hipMidY !== null) {
-    const torsoLen = Math.abs(neckY - hipMidY);
-    if (torsoLen > 0.01) {
-      const targetH = torsoLen * 1.05;     // extend ~5% below hips
-      sH = targetH / modelH;
-    }
+    torsoCenterY = (neckY + hipMidY) / 2;
+  } else {
+    // Estimate: torso center is about 0.5× shoulder width below neck
+    torsoCenterY = shoulderMidY - shoulderDist * 0.45;
   }
 
-  // Clamp height/width ratio to prevent extreme distortion
-  const ratio = sH / sW;
-  if (ratio < 0.6)  sH = sW * 0.6;
-  if (ratio > 1.3)  sH = sW * 1.3;
+  // ── UNIFORM SCALE from shoulder distance ──
+  const SCALE_MULTIPLIER = 2.2;
+  const modelW = Math.max(modelDims.width, 0.001);
+  const scaleFactor = (shoulderDist * SCALE_MULTIPLIER) / modelW;
 
   const adj = adjustments.scale;
-  let scaleX = sW * adj;
-  let scaleY = sH * adj;
-  let scaleZ = sW * adj;
+  const uniformScale = scaleFactor * adj;
 
-  // ── Min/Max scale clamping (Fix 5+6) ──
+  // Clamp scale to sane range
   const fovRad = THREE.MathUtils.degToRad(camera.fov);
   const halfH  = Math.tan(fovRad / 2) * camera.position.z;
   const halfW  = halfH * camera.aspect;
-
-  // Minimum: garment at least ~15% of visible width
-  const minWorldWidth = halfW * 0.3;
-  const minScale = minWorldWidth / Math.max(modelW, 0.001);
-  // Maximum: garment never wider than ~90% of visible width
-  const maxScale = (halfW * 1.8) / Math.max(modelW, 0.001);
-
-  scaleX = Math.min(maxScale, Math.max(minScale, scaleX));
-  scaleY = Math.min(maxScale, Math.max(minScale, scaleY));
-  scaleZ = Math.min(maxScale, Math.max(minScale, scaleZ));
+  const minScale = (halfW * 0.15) / modelW;
+  const maxScale = (halfW * 2.0) / modelW;
+  const clampedScale = Math.min(maxScale, Math.max(minScale, uniformScale));
 
   // ── Position ──
-  const adjX   = (adjustments.x / 100) * halfW * 0.5;
-  const adjY   = (adjustments.y / 100) * halfH * 0.5;
-
-  // Center garment between neck and hips
-  let centerY;
-  if (hipMidY !== null) {
-    centerY = (neckY + hipMidY) / 2;
-  } else {
-    centerY = shoulderMidY - worldShoulderW * 0.45;
-  }
-
+  const adjX = (adjustments.x / 100) * halfW * 0.5;
+  const adjY = (adjustments.y / 100) * halfH * 0.5;
   const posX = shoulderMidX + adjX;
-  let posY = centerY + adjY;
+  let posY = torsoCenterY + adjY;
   const posZ = (adjustments.z / 100) * 0.5;
 
-  // ── Clamp Y position to keep garment on screen when bending ──
-  const maxWorldY = halfH * 0.85;
+  // Clamp Y to keep garment on screen
+  const maxWorldY = halfH * 0.9;
   posY = Math.max(-maxWorldY, Math.min(maxWorldY, posY));
 
-  // ── Rotation ──
-  // With mirrorX=true, lShWorld.x > rShWorld.x in world space.
-  // CSS scaleX(-1) on the container visually negates the rotation,
-  // so we compute WITHOUT negation — CSS handles the flip.
+  // ── Rotation Z: shoulder tilt angle ──
   const rotZ = Math.atan2(lShWorld.y - rShWorld.y, lShWorld.x - rShWorld.x);
 
-  // Body turn magnitude from apparent shoulder width
-  const maxShoulderW = Math.tan(fovRad / 2) * camera.position.z * 0.6;
-  const turnCos = Math.min(1.0, worldShoulderW / maxShoulderW);
+  // ── Rotation Y: body turn estimate from apparent shoulder width ──
+  const maxShoulderW = halfW * 0.6;
+  const turnCos = Math.min(1.0, shoulderDist / maxShoulderW);
   const turnMag = Math.acos(Math.max(0.01, turnCos));
 
-  // Turn direction: detect which way the person is turning
-  // Primary signal: nose offset relative to shoulder midpoint
-  // Secondary signal: shoulder midpoint offset relative to hip midpoint
   let turnDirection = 0;
   if (noseWorld) {
     const noseDx = noseWorld.x - shoulderMidX;
-    if (Math.abs(noseDx) > worldShoulderW * 0.03) {
+    if (Math.abs(noseDx) > shoulderDist * 0.03) {
       turnDirection = Math.sign(noseDx);
     }
   }
-  if (turnDirection === 0 && hipMidX !== null) {
-    const shHipDx = shoulderMidX - hipMidX;
-    if (Math.abs(shHipDx) > worldShoulderW * 0.05) {
-      turnDirection = Math.sign(shHipDx);
-    }
-  }
 
-  // Signed rotY, clamped to ±45° to prevent garment from flipping
-  // CSS scaleX(-1) on the container visually negates Y rotation,
-  // so we use positive turnDirection — CSS handles the flip.
   const rotY = THREE.MathUtils.clamp(
     turnDirection * turnMag,
     -Math.PI / 4,
-    Math.PI / 4
+    Math.PI / 4,
   );
 
   return {
     position: new THREE.Vector3(posX, posY, posZ),
-    scaleX,
-    scaleY,
-    scaleZ,
+    scale: clampedScale,
     rotZ,
     rotY,
   };
 }
 
-export { videoPixelToWorld };

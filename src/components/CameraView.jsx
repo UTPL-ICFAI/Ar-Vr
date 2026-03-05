@@ -18,7 +18,7 @@ function CameraPlaceholder({ onStart }) {
 function HintBox() {
   return (
     <div className="hint-box">
-      <span>💡</span> Stand 1–2 meters from camera · Face forward · Keep arms slightly out
+      <span>💡</span> Stand 1–2 m away · Face forward · Arms slightly out
     </div>
   );
 }
@@ -32,36 +32,29 @@ export default function CameraView({
   loading,
   noPersonDetected,
   onStartCamera,
-  lastPose,
-  currentCloth,
-  bonesDebug,
-  onSnapshot,
+  isFrontCamera,
 }) {
   return (
     <div className="camera-area">
-      <video ref={videoRef} autoPlay playsInline muted className="webcam" />
-      <canvas ref={overlayCanvasRef} className="overlay-canvas" />
-      <div ref={threeContainerRef} className="three-container" />
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className={`webcam${isFrontCamera ? ' mirrored' : ''}`}
+      />
+      <canvas
+        ref={overlayCanvasRef}
+        className={`overlay-canvas${isFrontCamera ? ' mirrored' : ''}`}
+      />
+      <div
+        ref={threeContainerRef}
+        className={`three-container${isFrontCamera ? ' mirrored' : ''}`}
+      />
       {!cameraActive && <CameraPlaceholder onStart={onStartCamera} />}
       {cameraActive && <StatusBar dot={status.dot} message={status.message} />}
       {loading.visible && <LoadingOverlay message={loading.message} />}
       {noPersonDetected && <HintBox />}
-      {cameraActive && (
-        <div className="debug-overlay">
-          <div>Cloth: {currentCloth}</div>
-          <div>Video: {videoRef.current?.videoWidth}x{videoRef.current?.videoHeight}</div>
-          <div>Container: {threeContainerRef.current?.clientWidth}x{threeContainerRef.current?.clientHeight}</div>
-          <div>L shoulder: ({Math.round(lastPose?.keypoints[5]?.x)}, {Math.round(lastPose?.keypoints[5]?.y)})</div>
-          <div>R shoulder: ({Math.round(lastPose?.keypoints[6]?.x)}, {Math.round(lastPose?.keypoints[6]?.y)})</div>
-          <div>Expected NDC Y: {lastPose ? (-(((lastPose.keypoints[5]?.y + lastPose.keypoints[6]?.y)/2 / (videoRef.current?.videoHeight||720)) * 2 - 1)).toFixed(2) : 'n/a'}</div>
-          {bonesDebug && <div>Bones: {bonesDebug}</div>}
-        </div>
-      )}
-      {cameraActive && onSnapshot && (
-        <div className="mobile-controls">
-          <button className="btn-snapshot" onClick={onSnapshot}>📸 Snapshot</button>
-        </div>
-      )}
     </div>
   );
 }
