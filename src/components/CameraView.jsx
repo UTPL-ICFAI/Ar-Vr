@@ -35,6 +35,7 @@ export default function CameraView({
   lastPose,
   currentCloth,
   bonesDebug,
+  onSnapshot,
 }) {
   return (
     <div className="camera-area">
@@ -46,12 +47,7 @@ export default function CameraView({
       {loading.visible && <LoadingOverlay message={loading.message} />}
       {noPersonDetected && <HintBox />}
       {cameraActive && (
-        <div style={{
-          position: 'absolute', bottom: 60, left: 10,
-          background: 'rgba(0,0,0,0.7)', color: '#e8ff47',
-          fontSize: '10px', padding: '6px 10px', borderRadius: '6px',
-          fontFamily: 'monospace', lineHeight: 1.8, zIndex: 20
-        }}>
+        <div className="debug-overlay">
           <div>Cloth: {currentCloth}</div>
           <div>Video: {videoRef.current?.videoWidth}x{videoRef.current?.videoHeight}</div>
           <div>Container: {threeContainerRef.current?.clientWidth}x{threeContainerRef.current?.clientHeight}</div>
@@ -59,6 +55,11 @@ export default function CameraView({
           <div>R shoulder: ({Math.round(lastPose?.keypoints[6]?.x)}, {Math.round(lastPose?.keypoints[6]?.y)})</div>
           <div>Expected NDC Y: {lastPose ? (-(((lastPose.keypoints[5]?.y + lastPose.keypoints[6]?.y)/2 / (videoRef.current?.videoHeight||720)) * 2 - 1)).toFixed(2) : 'n/a'}</div>
           {bonesDebug && <div>Bones: {bonesDebug}</div>}
+        </div>
+      )}
+      {cameraActive && onSnapshot && (
+        <div className="mobile-controls">
+          <button className="btn-snapshot" onClick={onSnapshot}>📸 Snapshot</button>
         </div>
       )}
     </div>

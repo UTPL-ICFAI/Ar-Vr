@@ -248,7 +248,7 @@ export default function useThreeJS(containerRef, videoRef, currentCloth, adjustm
 
     // Renderer
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(width, height);
     renderer.setClearColor(0x000000, 0);
     renderer.sortObjects = true;

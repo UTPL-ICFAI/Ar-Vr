@@ -98,9 +98,13 @@ function App() {
     }
   }, [rendererRef, sceneRef, cameraRef]);
 
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const toggleSidebar = useCallback(() => setSidebarOpen((o) => !o), []);
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+
   return (
     <div className="app-layout">
-      <Header />
+      <Header sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />
       <div className="main-layout">
         <CameraView
           videoRef={videoRef}
@@ -114,6 +118,7 @@ function App() {
           lastPose={debugPose}
           currentCloth={currentCloth}
           bonesDebug={bonesDebug}
+          onSnapshot={handleSnapshot}
         />
         <Sidebar
           currentCloth={currentCloth}
@@ -126,6 +131,8 @@ function App() {
           loadedModels={loadedModels}
           garmentFlipped={garmentFlipped}
           onToggleFlip={() => setGarmentFlipped(f => !f)}
+          isOpen={sidebarOpen}
+          onClose={closeSidebar}
         />
       </div>
     </div>

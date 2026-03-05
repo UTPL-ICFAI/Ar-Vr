@@ -10,21 +10,11 @@ export default function AdjustmentSliders({ adjustments, onChange, onReset, onSn
       <div className="adjustments-title">ADJUSTMENTS</div>
 
       {/* Fit presets */}
-      <div className="preset-row" style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+      <div className="preset-row">
         {FIT_PRESETS.map((p) => (
           <button
             key={p.label}
             className={`btn-preset${adjustments.scale === p.scale ? ' active' : ''}`}
-            style={{
-              flex: 1,
-              padding: '4px 0',
-              fontSize: 12,
-              borderRadius: 4,
-              border: adjustments.scale === p.scale ? '2px solid #6c63ff' : '1px solid #555',
-              background: adjustments.scale === p.scale ? '#6c63ff22' : 'transparent',
-              color: '#fff',
-              cursor: 'pointer',
-            }}
             onClick={() => onPreset && onPreset(p.scale)}
           >
             {p.label}

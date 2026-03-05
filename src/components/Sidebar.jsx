@@ -13,50 +13,54 @@ export default function Sidebar({
   loadedModels,
   garmentFlipped,
   onToggleFlip,
+  isOpen,
+  onClose,
 }) {
+  const handleSelectCloth = (id) => {
+    onSelectCloth(id);
+    // Auto-close sidebar on mobile after selection
+    if (window.innerWidth < 1024) onClose();
+  };
+
   return (
-    <div className="sidebar">
-      <div className="sidebar-header">
-        <h2>WARDROBE</h2>
-        <p>Select a garment to try on</p>
-      </div>
-      <div className="clothes-grid">
-        {GARMENTS.map((g) => (
-          <ClothCard
-            key={g.id}
-            garment={g}
-            isActive={currentCloth === g.id}
-            isLoaded={!!loadedModels?.[g.id]}
-            isLoading={currentCloth === g.id && !loadedModels?.[g.id] && g.id !== 'none'}
-            onClick={() => onSelectCloth(g.id)}
-          />
-        ))}
-      </div>
-      <button
-        onClick={onToggleFlip}
-        style={{
-          margin: '0 20px 12px',
-          padding: '10px',
-          background: garmentFlipped ? 'var(--accent)' : 'transparent',
-          color: garmentFlipped ? '#000' : 'var(--text)',
-          border: '1px solid var(--border)',
-          borderRadius: '8px',
-          cursor: 'pointer',
-          fontFamily: 'DM Sans, sans-serif',
-          fontSize: '0.82rem',
-          width: 'calc(100% - 40px)',
-          transition: 'all 0.2s',
-        }}
-      >
-        {garmentFlipped ? '↩ Front View' : '↪ Flip Garment'}
-      </button>
-      <AdjustmentSliders
-        adjustments={adjustments}
-        onChange={onAdjustmentChange}
-        onReset={onReset}
-        onSnapshot={onSnapshot}
-        onPreset={onPreset}
+    <>
+      <div
+        className={`sidebar-overlay${isOpen ? ' visible' : ''}`}
+        onClick={onClose}
       />
-    </div>
+      <div className={`sidebar${isOpen ? ' open' : ''}`}>
+        <div className="sidebar-header">
+          <h2>WARDROBE</h2>
+          <p>Select a garment to try on</p>
+        </div>
+        <div className="sidebar-scroll">
+          <div className="clothes-grid">
+            {GARMENTS.map((g) => (
+              <ClothCard
+                key={g.id}
+                garment={g}
+                isActive={currentCloth === g.id}
+                isLoaded={!!loadedModels?.[g.id]}
+                isLoading={currentCloth === g.id && !loadedModels?.[g.id] && g.id !== 'none'}
+                onClick={() => handleSelectCloth(g.id)}
+              />
+            ))}
+          </div>
+          <button
+            className={`btn-flip${garmentFlipped ? ' flipped' : ''}`}
+            onClick={onToggleFlip}
+          >
+            {garmentFlipped ? '↩ Front View' : '↪ Flip Garment'}
+          </button>
+          <AdjustmentSliders
+            adjustments={adjustments}
+            onChange={onAdjustmentChange}
+            onReset={onReset}
+            onSnapshot={onSnapshot}
+            onPreset={onPreset}
+          />
+        </div>
+      </div>
+    </>
   );
 }
